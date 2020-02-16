@@ -1,0 +1,15 @@
+#!/bin/bash
+
+while getopts ":h:v:" opt; do
+	case $opt in 
+		h) agr1="$OPTARG"
+		echo $OPTARG
+		;;
+		v) agr2="$OPTARG"
+		;;
+	esac
+done
+echo $agr1
+echo $agr2
+
+aws ec2 run-instances --image-id ami-7b0b621b

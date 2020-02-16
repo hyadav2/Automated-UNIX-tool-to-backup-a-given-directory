@@ -2,14 +2,31 @@
 
 while getopts ":h:v:" opt; do
 	case $opt in 
-		h) agr1="$OPTARG"
+		h) arg1="$OPTARG"
 		echo $OPTARG
 		;;
-		v) agr2="$OPTARG"
+		v) arg2="$OPTARG"
 		;;
 	esac
 done
-echo $agr1
-echo $agr2
+echo $arg1
+echo $arg2
 
-aws ec2 run-instances --image-id ami-7b0b621b
+instance_id=$(aws ec2 run-instances --image-id ami-7b0b621b | grep InstanceId | cut -d":" -f2 | cut -d'"' -f2)
+echo $instance_id
+
+instance_status=$(aws ec2 describe-instances --instance-id $instance_id | grep '"Name": "running"' | cut -d":" -f2 |cut -d"\"" -f2)
+
+while [ "$instance_status" != "running" ]
+do
+instance_status=$(aws ec2 describe-instances --instance-id $instance_id | grep '"Name": "running"' | cut -d":" -f2 |cut -d"\"" -f2)
+if [ "$instance_status" == "running" ]; then
+	break
+fi
+done
+
+#echo "Out of while loop"
+#sleep 10
+#echo "Sleep 10 done"
+
+aws ec2 attach-volume --instance-id $instance_id --volume-id $arg2 --device /dev/sdh

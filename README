@@ -13,25 +13,25 @@ I have used the bash scripting to implement final version of ec2-backup.
      
      
      
-	echo Usage:
-	echo
-	echo "************************************ AWS EC2 backup tool version 2 ****************************************"
-	echo
-	echo "Information: This tool is being designed to take the backup of a directory on a volume provided by the user"
-	echo "which is attached to an EC2 instance. The files are copied from the given directory to the volume."
-	echo
-    	echo "usage: $ec2-backup [-h] [-v] [volume_id] <-d> <directory_path> "
-    	echo "[options]"
-    	echo "  -v      provide volume_id"
-    	echo "  -d      provide directory"
-    	echo "  -h      display help"
-    	echo
-    	echo "<parameter>"
-    	echo "<volume_id> 	volume_id specify where back up should be performed"
-    	echo "<directory_path>	directory_path specify for which directory needs back up"
-	echo
-	echo "Version history: Current version is v2. This version attaches the volume provided to the EC2. Once the volume is"
-	echo "attached, the script connects to the EC2 instance using ssh and takes the backup of the given directory on the volume."
+echo Usage:
+echo
+echo "********************* AWS EC2 backup tool version 2 *********************"
+echo
+echo "Information: This tool is being designed to take the backup of a directory on a volume provided by the user"
+echo "which is attached to an EC2 instance. The files are copied from the given directory to the volume."
+echo
+echo "usage: $ec2-backup [-h] [-v] [volume_id] <-d> <directory_path> "
+echo "[options]"
+echo "  -v      provide volume_id"
+echo "  -d      provide directory"
+echo "  -h      display help"
+echo
+echo "<parameter>"
+echo "<volume_id> 	volume_id specify where back up should be performed"
+echo "<directory_path>	directory_path specify for which directory needs back up"
+echo
+echo "Version history: Current version is v2. This version attaches the volume provided to the EC2. Once the volume is"
+echo "attached, the script connects to the EC2 instance using ssh and takes the backup of the given directory on the volume."
 
 
 

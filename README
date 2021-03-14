@@ -1,0 +1,42 @@
+README
+
+
+I have used the bash scripting to implement final version of ec2-backup.  
+
+1. The task was to write a program that to perform a backup of a given directory via dd command to a data storage device in the cloud by creating an instance and attaching an volume to it and should be executable on linux-lab.cs.stevens.edu 
+
+2. If the user provides volume id of other region than default region so ec2-backup will fail by throwing an error message region is unsupported else no output except volume id.
+
+3. When volume is not provided AWS requires that EBS volumes should exist in the same Availability Zone (AZ) as an EC2 instance so to avoid the confusion instance is created first and according to its AZ volume is created in the same zone.
+
+4. Implemented/fixed suggestion given in the feedback for the ec2-backup v1.
+     
+
+Challenges faced:
+
+1. Getting an AMI ID for each region:
+
+ I tried to execute this command, as on their site list of all AMI's were available but when I executed this and tried all the ami it ask for subscription except us-east-1 and it work fine for us-east-1. My plan was to get the latest AMI id rather hard coding the AMI id so it will never fail for aki change in the future. Under that assumption I kept the region change query for last and encountered with an error. 
+
+ What I learnt here is sometimes even official OS doesnt work (without user intervention by goin to to the link provided and subscribing to it.)because of the updates and change in the aki. 
+
+ aws ec2 describe-images --executable-users all --owners amazon --filters "Name=name,Values=CentOS*" "Name=root-device-name,Values=/dev/sda1" "Name=state,Values=available" --query 'reverse(sort_by(Images,&CreationDate))[:3].[ImageId,CreationDate]' --output table
+
+ I do get the list of AMI but when try to run the instance it gives following error:
+
+Error:
+An error occurred (OptInRequired) when calling the RunInstances operation: In order to use this AWS Marketplace product you need to accept terms and subscribe. To do so please visit https://aws.amazon.com/marketplace/pp?sku=aw0evgkw8e5c1q413zgy5pjce
+
+So at last moment, rather changing code which is set for CentOS I asked for a help from a friend and he shared the AMI ID's which was already been tested. In program, I have covered four us regions.
+
+2. While taking a backup on a device and attaching to another instance and trying to verify the the table of content as per option -t there I realaized under /dev the name of the volume device is changed. I took lot of time to figure out wheter it has been back up. 
+
+
+3. < -d > while executing the program this option is kept mandatory as program is about to take a backup of a given directory so value can not be null. 
+
+4. Sometimes with same ami it ssh and sometimes it does not with connection time out. But could not figure out why it happens.
+
+
+References:
+1. https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/finding-an-ami.html#finding-quick-start-ami
+2. https://wiki.centos.org/Cloud/AWS

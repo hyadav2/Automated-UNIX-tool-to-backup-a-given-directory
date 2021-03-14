@@ -1,0 +1,444 @@
+#!/bin/bash
+
+ami_id=''
+volume_id=''
+rgn=''
+avail_zone=''
+instance_zone=''
+volume_zone=''
+instance_id=''
+device_type=''
+bckp_dr=''
+vol_size=''
+instance_public_dns=''
+err_code=''
+
+function usage
+{
+	echo
+	echo Usage:
+	echo
+	echo "************************************ AWS EC2 backup tool version 2 ****************************************"
+	echo
+	echo "Information: This tool is being designed to take the backup of a directory on a volume provided by the user"
+	echo "which is attached to an EC2 instance. The files are copied from the given directory to the volume."
+	echo
+    	echo "usage: $ec2-backup [-h] [-v] [volume_id] <-d> <directory_path> "
+    	echo "[options]"
+    	echo "  -v      provide volume_id"
+    	echo "  -d      provide directory"
+    	echo "  -h      display help"
+    	echo
+    	echo "<parameter>"
+    	echo "<volume_id> 	volume_id specify where back up should be performed"
+    	echo "<directory_path>	directory_path specify for which directory needs back up"
+	echo
+	echo "Version history: Current version is v2. This version attaches the volume provided to the EC2. Once the volume is"
+	echo "attached, the script connects to the EC2 instance using ssh and takes the backup of the given directory on the volume."
+	echo
+
+}
+
+
+function get_region
+{
+	rgn=`aws configure get region --output json`
+	(( $EC2_BACKUP_VERBOSE )) && echo "Current region is: "$rgn
+}
+
+
+function get_availability_zone
+{
+	get_region
+	#echo $rgn
+	#avail_zone=`aws ec2 describe-availability-zones --filters Name=state,Values=available --output json | grep "$rgn" | cut -d":" -f2 | cut -d'"' -f2 | head -1`
+	avail_zone=`aws ec2 describe-availability-zones --region $rgn --filters Name=state,Values=available --output json | grep ZoneName | grep "$instance_zone" | cut -d '"' -f4`
+	(( $EC2_BACKUP_VERBOSE )) && echo "Availability zone is: "$avail_zone
+}
+
+
+function get_volume_size
+{
+	vol_size=`du -csh --block-size=1G $bckp_dr | grep total | cut -f1`
+	vol_size=$(( vol_size*2 ))
+}
+
+
+function create_volume
+{
+	#echo "Will be creating a volume"
+	get_instance_zone
+	get_availability_zone
+	get_volume_size
+	(( $EC2_BACKUP_VERBOSE )) && echo "Volume will be created in region-zone: "$avail_zone
+	#echo "Volume will be create in instance_zone: "$instance_zone
+
+	volume_id=`aws ec2 create-volume --volume-type gp2 --size $vol_size --availability-zone $avail_zone --output json | grep VolumeId | cut -d'"' -f4`
+	(( $EC2_BACKUP_VERBOSE )) && echo "Volume created ID: "$volume_id
+	if [ "$volume_id" != "" ]; then
+		(( $EC2_BACKUP_VERBOSE )) && echo "Volume created successfully"
+		return 0
+	else
+		echo "Trouble creating volume"
+		#echo "Script exited with code: "$cmd_op
+		echo "Terminating the instance (if created)"
+		stop_instance
+		#exit
+		return 1
+	fi
+}
+
+
+function volume_id_check
+{
+	op=`aws ec2 describe-volumes --region $rgn --output json --filters --query "Volumes[*].{Zone:VolumeId}"|grep "$volume_id"`
+	(( $EC2_BACKUP_VERBOSE )) && echo "Volume id check: "$op
+	if [ "$op" != "" ]; then
+		return 0
+	else
+		#echo "Write code to check volume availability"
+		(( $EC2_BACKUP_VERBOSE )) && echo "Volume does not exist or is in-use; Creating a new volume"
+		return 1
+	fi
+}
+
+
+function get_volume_zone
+{
+	volume_zone=`aws ec2 describe-volumes --region $rgn --output json --filters Name=status,Values=available Name=volume-id,Values=$volume_id --query "Volumes[*].{Zone:AvailabilityZone}" | grep Zone | cut -d":" -f2 | cut -d '"' -f2`
+	#get_instance_zone
+	#echo "Volume region check instance_zone: "$instance_zone
+	(( $EC2_BACKUP_VERBOSE )) && echo "Volume region check v1: "$v1
+}
+
+
+function volume_state_check
+{
+	local v2=`aws ec2 describe-volumes --region us-east-1 --output json --filters Name=status,Values=available Name=volume-id,Values=$volume_id --query "Volumes[*].{State:State}"  | grep State | cut -d":" -f2 | cut -d '"' -f2`
+	(( $EC2_BACKUP_VERBOSE )) && echo "volume_state_check: "$v2
+	if [[ "$v2" == "available" ]]; then
+		return 0
+	else
+		(( $EC2_BACKUP_VERBOSE )) && echo "Volume specified already in use; Creating a new volume"
+		return 1
+	fi
+}
+
+
+function volume_sanity_check
+{
+	#echo "Volume is checked if it exists in the current region"
+	get_region
+
+	volume_id_check
+	if [ $? = 0 ]; then
+		(( $EC2_BACKUP_VERBOSE )) && echo "id_check_completed; Volume id exists"
+		#volume_region_check
+		#if [ $? = 0 ]; then
+		#	echo "region_check_completed; Volume exists in region and is in the same availability zone"
+		volume_state_check
+		if [ $? = 0 ]; then
+			(( $EC2_BACKUP_VERBOSE )) && echo "state_check completed; Volume available for use"
+			return 0
+		else
+			return 1
+		fi
+		#else
+		#	return 1
+		#fi
+	else
+		return 1
+	fi
+
+}
+
+
+function driver
+{
+if [ "$volume_id" != "" ]; then
+	(( $EC2_BACKUP_VERBOSE )) && echo "Volume_id is provided: "$volume_id
+        volume_sanity_check
+	if [ $? = 0 ]; then
+		get_volume_zone
+		create_instance
+		attach_volume
+	else
+		(( $EC2_BACKUP_VERBOSE )) && echo "Volume-check failed, creating a new volume."
+		create_instance
+		create_volume
+		if [ $? = 0 ]; then
+			attach_volume
+			if [ $? = 0 ]; then
+				perform_backup
+				if [ $? = 0 ]; then
+					stop_instance
+					return 0
+				else
+					stop_instance
+					return 1
+				fi
+			else
+				stop_instance
+			fi
+		else
+			echo "Create volume failed"
+			stop_instance
+		fi
+	fi
+else
+        #echo "Volume_id is not provided, creating a new volume."
+        create_volume
+	if [ $? = 0 ]; then
+		attach_volume
+		if [ $? = 0 ]; then
+			perform_backup
+			if [ $? = 0 ]; then
+				return 0
+			else
+				return 1
+			fi
+		else
+			return 1
+		fi
+	else
+		echo "Create volume failed"
+		stop_instance
+	fi
+fi
+}
+
+
+function get_device_type
+{
+	device_type="/dev/sdj"
+	(( $EC2_BACKUP_VERBOSE )) && echo "device type is: "$device_type
+}
+
+
+function is_volume_available
+{
+	aws ec2 wait volume-available --volume-ids $volume_id
+	return 0
+}
+
+
+function attach_volume
+{
+	does_instance_exists
+	if [ $? = 0 ]; then
+		is_instance_running
+	else
+		create_instance
+		is_instance_running
+	fi
+	get_device_type
+	is_volume_available
+	(( $EC2_BACKUP_VERBOSE )) && echo "attaching volume.."
+	aws ec2 attach-volume --instance-id $instance_id --volume-id $volume_id --device $device_type --output json >/dev/null 2>&1
+	if [ $? = 0 ]; then
+		(( $EC2_BACKUP_VERBOSE )) && echo "attachment successful; attempting backup"
+		return 0
+	else
+		echo "attachment failed; shutting down instance"
+		stop_instance
+		return 1
+	fi
+}
+
+
+function perform_backup
+{
+	(( $EC2_BACKUP_VERBOSE )) && echo "ssh into instance"
+	get_instance_dns
+	tar cPf - $bckp_dr | ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH centos@$instance_public_dns "sudo dd of=/dev/sdj"
+	if [ $? == 0 ]; then
+		(( $EC2_BACKUP_VERBOSE )) && echo "Backup successful"
+		stop_instance
+		return 0
+	else
+		echo "Backup failed"
+		stop_instance
+		return 1
+	fi
+}
+
+
+function get_instance_dns
+{
+	instance_public_dns=`aws ec2 describe-instances --instance-id $instance_id | grep PublicIpAddress | cut -d":" -f2 | cut -d"\"" -f2`
+}
+
+
+
+function does_instance_exists
+{
+	instance_id=$instance_id
+	if [ "$instance_id" != "" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+
+function start_instance
+{
+	(( $EC2_BACKUP_VERBOSE )) && echo "Instance id is: "$instance_id
+	aws ec2 start-instances --instance-ids $instance_id --output json
+	#echo "Write CODE to start instance"
+}
+
+
+function is_instance_running
+{
+	instance_status=`aws ec2 describe-instances --instance-id $instance_id --output json | grep '"Name":' | cut -d":" -f2 |cut -d"\"" -f2`
+	(( $EC2_BACKUP_VERBOSE )) && echo "Instance status is: "$instance_status
+	if [[ "$instance_status" == "running"  ]]; then
+		return 0
+	else
+		if [[ "$instance_status" == "stopped" ]]; then
+			start_instance
+			is_instance_running
+			return 0
+		else
+			does_instance_exists
+			if [ $? = 0 ]; then
+				(( $EC2_BACKUP_VERBOSE )) && echo "Waiting for instance to run"
+				#start_instance
+				aws ec2 wait instance-running --instance-id $instance_id
+				is_instance_running
+				return 0
+			else
+				create_instance
+				is_instance_running
+				return 0
+			fi
+		fi
+	fi
+
+}
+
+
+function get_instance_zone
+{
+	instance_zone=`aws ec2 describe-instances --instance-id $instance_id --output json | grep AvailabilityZone | cut -d'"' -f4`
+	if [ $? = 0 ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+
+function get_ami_id
+{
+	get_region
+	#ami_id=`aws ec2 describe-images --executable-users all --owners aws-marketplace --region $rgn --filters "Name=name,Values=CentOS*" "Name=state,Values=available" "Name=product-code,Values=6x5jmcajty9edm3f211pqjfn2" --query 'reverse(sort_by(Images,&CreationDate))[:10].[ImageId,CreationDate]' --output json| grep ami | cut -d'"' -f2 | head -1`
+	case $rgn in
+		us-east-1) ami_id=ami-f9fa4183
+		;;
+		us-east-2) ami_id=ami-00fd2a47558af2d5e
+		;;
+		us-west-1) ami_id=ami-02caf19519c4c499e
+		;;
+		us-west-2) ami_id=ami-00b393dff4b72de45
+	esac
+	#ami_id=ami-f9fa4183
+}
+
+
+function create_instance
+{
+	get_ami_id
+	if [ "$volume_id" != "" ]; then
+		instance_id=`aws ec2 run-instances --image-id $ami_id --key-name ec2-backup --instance-type t2.micro --count 1 --placement AvailabilityZone=$volume_zone $EC2_BACKUP_FLAGS_AWS | grep InstanceId | cut -d":" -f2 | cut -d'"' -f2`
+	else
+		instance_id=`aws ec2 run-instances --image-id $ami_id --key-name ec2-backup --instance-type t2.micro --count 1 $EC2_BACKUP_FLAGS_AWS | grep InstanceId | cut -d":" -f2 | cut -d'"' -f2`
+	fi
+	(( $EC2_BACKUP_VERBOSE )) && echo "Instance id is: "$instance_id
+}
+
+
+function stop_instance
+{
+	does_instance_exists
+	if [ $? = 0 ]; then
+		(( $EC2_BACKUP_VERBOSE )) && echo "Instance being terminated"
+		aws ec2 stop-instances --instance-ids $instance_id >/dev/null 2>&1
+		#aws ec2 wait instance-stopped
+		aws ec2 terminate-instances --instance-ids $instance_id >/dev/null 2>&1
+		return 0
+	fi
+}
+
+
+function main
+{
+	check_directory
+	if [ "$volume_id" == "" ]; then
+		#bckp_dr=$1
+		#echo "Directory to backup: "$bckp_dr
+		create_instance
+		driver
+		if [ $? = 0 ]; then
+			return 0
+		else
+			return 1
+		fi
+	else
+		#bckp_dr=$3
+		#echo "Directory to backup: "$bckp_dr
+		driver
+		if [ $? = 0 ]; then
+			return 0
+		else
+			return 1
+		fi
+		#create_instance
+	fi
+}
+
+
+while getopts "hvd:" opt; do
+	case $opt in 
+		h) usage
+		;;
+		v) volume_id="$OPTARG"
+		;;
+		d) bckp_dr="$OPTARG"
+		   opt_d=1
+		;;
+		?) usage
+		;;
+	esac
+done
+
+function check_directory
+{
+	if [[ $opt_d -ne 1 ]]; then
+		echo "Option -d and the path of the directory to be backed up missing"
+		usage
+		exit 1
+	fi
+
+	cd $bckp_dr>/dev/null 2>&1
+	if [ $? != 0 ]; then
+		echo "Directory specified does not exist"
+		usage
+		exit 1
+	fi
+}
+
+#(( $EC2_BACKUP_VERBOSE )) && echo "Hi"
+#echo "hi"
+
+main
+if [ $? = 0 ]; then
+	(( $EC2_BACKUP_VERBOSE )) && echo "Code exited succesfully with status: "$?
+	echo $volume_id
+
+else
+	err_code=1
+	echo "Code exited with error code: "$err_code
+fi
+

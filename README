@@ -3,7 +3,7 @@ README
 
 I have used the bash scripting to implement final version of ec2-backup.
 
-1. The task was to write a program that to perform a backup of a given directory via dd command to a data storage device in the cloud by creating an instance and attaching an volume to it and should be executable on linux-lab.cs.stevens.edu 
+1. The objective is to perform a backup of a given directory via dd command to a data storage device in the cloud by creating an instance and attaching an volume to it and should be executable on linux-lab.cs.stevens.edu 
 
 2. If the user provides volume id of other region than default region so ec2-backup will fail by throwing an error message region is unsupported else no output except volume id.
 
